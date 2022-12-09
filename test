@@ -1,0 +1,254 @@
+library(shiny)
+library(rsconnect)
+
+ui <- fluidPage(
+ 
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("Name", 
+                  "Predictor:",
+                  c("age", 
+                    "bmi", 
+                    "smoker or not",
+                    "exercise or not"),
+                  selected = "age"),
+      #Read the data
+      fileInput("upload", label="input file", accept = c(".csv")),
+      #Read the actual (solution) data
+      fileInput("upload_Solution", label="solution file", accept = c(".csv")),
+      # This is for showing the specific result, the more detailed imformation of THE attribute and THE cost
+      #checkboxInput("checkbox", label = "Show specific result", value = FALSE),
+      #checkboxInput("ratio", label = "Show Expensive ratio (number of expensive people/total number of people)", value = FALSE)
+    ),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Plot", plotOutput("plot")),
+        tabPanel("Map", plotOutput("map")),
+        tabPanel("Hist",numericInput(inputId = "n", "Sample size", value = 25), plotOutput(outputId = "hist")),
+        #a place to output a table (i.e., a dataframe) 
+        tabPanel("Preview", DT::dataTableOutput("headForDF")),
+        #output the results (for now, just simple text)
+        tabPanel("Prediction", verbatimTextOutput("txt_results", placeholder = TRUE),
+                 h4("Sensitivity:"),
+                 verbatimTextOutput("sensitivity"))
+      )
+    )
+  )
+  
+)
+
+# Define server logic required to draw a histogram
+server <- function(input, output, session) {
+  # show the plot of different attributes
+  output$plot <- renderPlot({
+    if(input$Name == "age" & input$checkbox == FALSE) {
+      ggplot(age_group, aes(age_group, count, fill=factor(Expensive))) + 
+      geom_bar(stat="identity", position=position_stack()) + 
+      theme_classic() +
+      theme(legend.position = "top") + 
+      geom_text(aes(label=paste(count,"(",prop*100, "%)")), size = 3, position = position_stack(0.5))
+    }
+    else if(input$Name == "age" & input$checkbox == TRUE) {
+      ggplot(age_group_cost, aes(age_group, total, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme(legend.position = "top") + 
+        theme_classic() +
+        geom_text(aes(label=paste(round(total, 0),"(",prop*100, "%)")), size = 3, position = position_stack(0.5)) +
+        scale_y_continuous(labels = scales::comma)
+    }
+    else if(input$Name == "bmi" & input$checkbox == FALSE) {
+      ggplot(bmi_group, aes(bmi_group, count, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme_classic() +
+        theme(legend.position = "top") + 
+        geom_text(aes(label=paste(count,"(",prop*100, "%)")), size = 3, position = position_stack(0.5))
+    }
+    else if(input$Name == "bmi" & input$checkbox == TRUE) {
+      ggplot(bmi_group_cost, aes(bmi_group, total, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme(legend.position = "top") + 
+        theme_classic() +
+        geom_text(aes(label=paste(round(total, 0),"(",prop*100, "%)")), size = 3, position = position_stack(0.5)) +
+        scale_y_continuous(labels = scales::comma)
+    }
+    else if(input$Name == "smoker or not" & input$checkbox == FALSE) {
+      ggplot(smoker_group, aes(smoker, count, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme_classic() +
+        theme(legend.position = "top") + 
+        geom_text(aes(label=paste(count,"(",prop*100, "%)")), size = 3, position = position_stack(0.5))
+    }
+    else if(input$Name == "smoker or not" & input$checkbox == TRUE) {
+      ggplot(smoker_group_cost, aes(smoker, total, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme(legend.position = "top") + 
+        theme_classic() +
+        geom_text(aes(label=paste(round(total, 0),"(",prop*100, "%)")), size = 3, position = position_stack(0.5)) +
+        scale_y_continuous(labels = scales::comma)
+    }
+    else if(input$Name == "exercise or not" & input$checkbox == FALSE) {
+      ggplot(exericse_group, aes(exercise, count, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme_classic() +
+        theme(legend.position = "top") + 
+        geom_text(aes(label=paste(count,"(",prop*100, "%)")), size = 3, position = position_stack(0.5))
+    }
+    else if(input$Name == "exercise or not" & input$checkbox == TRUE) {
+      ggplot(exercise_group_cost, aes(exercise, total, fill=factor(Expensive))) + 
+        geom_bar(stat="identity", position=position_stack()) + 
+        theme(legend.position = "top") + 
+        theme_classic() +
+        geom_text(aes(label=paste(round(total, 0),"(",prop*100, "%)")), size = 3, position = position_stack(0.5)) +
+        scale_y_continuous(labels = scales::comma)
+    }
+    
+  })
+  output$hist <- renderPlot({ 
+    hist(rnorm(input$n))
+    })
+    
+  output$map <- renderPlot({
+    states <- map_data("state")
+    bb <- c(left = min(states$long),
+            bottom = min(states$lat),
+            right = max(states$long),
+            top = max(states$lat)) # set limitations of the map
+    map <- get_stamenmap(bbox = bb, zoom = 4)
+    df_by_state <- df_new %>% group_by(location,Expensive) %>% summarise(n = n())
+    df_by_state$State <- tolower(df_by_state$location)
+    df_by_state_yes <- filter(df_by_state, Expensive == 'yes')
+    
+    if(input$ratio == FALSE) {
+      dfMap <- merge(df_by_state_yes, states, by.x = 'State', by.y = 'region')
+      dfMap <- dfMap %>% arrange(order)
+      ggmap(map) + geom_polygon(data = dfMap, color = "black", alpha = 0.8, aes(x = long, y = lat, group = group, fill = n))
+    } else {
+      df_temp <- df_new %>% group_by(location) %>% summarise(n = n())
+      df_by_state_yes$ratio <- df_by_state_yes$n / df_temp$n
+      dfMap <- merge(df_by_state_yes, states, by.x = 'State', by.y = 'region')
+      dfMap <- dfMap %>% arrange(order)
+      ggmap(map) + geom_polygon(data = dfMap, color = "black", alpha = 0.8, aes(x = long, y = lat, group = group, fill = ratio))
+    }
+    
+  })
+  
+  
+  #require an input file, then read a CSV file
+    getTestData <- reactive({
+      req(input$upload)
+      read.csv(input$upload$datapath, stringsAsFactors = FALSE)
+    })
+    #require an the actual values for the prediction (i.e. solution file)
+    getSolutionData <- reactive({
+      req(input$upload_Solution)
+      read.csv(input$upload_Solution$datapath, stringsAsFactors = FALSE)
+    })
+
+    #show the output of the model
+    output$txt_results <- renderPrint({
+      #load the dataset
+      dataset <- getTestData()
+      dataset_solution <- getSolutionData()
+      #load and use the model on the new data 
+      use_model_to_predict(dataset, dataset_solution)
+    })
+    
+    #show the Sensitivity
+    output$sensitivity <- renderPrint({
+      df <- getTestData()
+      df_solution <- getSolutionData()
+      m <- getMatrixTable(df, df_solution)
+      sen <- m[1,1] / (m[1,1] + m[2,1])
+      sen
+    })
+    
+    #show a few lines of the dataframe
+    output$headForDF <- DT::renderDataTable(DT::datatable({
+      df <- getTestData()
+    }))
+}
+  
+  
+    #these libraries are needed, will be used with predict
+    library(rio);
+    library(kernlab);
+    library(caret);
+    library(rpart);
+    library(rpart.plot);
+    library(imputeTS);
+    library(tidyverse);
+    library(ggplot2);
+    library(e1071)
+    library(ggmap)
+    library(maps)
+    #process df
+    process_df <- function(df_raw){
+      df_add_age <- df_raw  %>% mutate(age_group = case_when(
+        df_raw$age < 20 ~ "under 18",
+        df_raw$age >= 20 & df_raw$age < 30 ~ "20-29",
+        df_raw$age >= 30 & df_raw$age < 40 ~ "30-39",
+        df_raw$age >= 40 & df_raw$age < 50 ~ "40-49",
+        df_raw$age >= 50 & df_raw$age < 60 ~ "50-59",
+        df_raw$age >= 60 ~ 'over 60'
+      ))
+      
+      df_add_bmi <- df_add_age %>% mutate(bmi_group = case_when(
+        df_add_age$bmi < 18.5 ~ "Underweight",
+        df_add_age$bmi >= 18.5 & df_add_age$bmi < 24.9 ~ "Normal Weight",
+        df_add_age$bmi >= 24.9 & df_add_age$bmi < 29.9 ~ "Overweight",
+        df_add_age$bmi >= 29.9 ~ "Obesity"
+      ))
+      df_new <- df_add_bmi
+      df_add_edu_bin <- df_new %>% mutate(is_educated = case_when(
+        df_new$education_level != "No College Degree" ~ "yes",
+        TRUE ~ "no"
+      ))
+      
+      df_add_child_bin <- df_add_edu_bin %>% mutate(have_child = case_when(
+        df_add_edu_bin$children == 0 ~ "no",
+        TRUE ~ "yes"
+      ))
+      
+      df_new <- df_add_child_bin
+      df_new$hypertension <- ifelse(df_new$hypertension==1, 'yes', 'no')
+      df <- data.frame(age_group = as.factor(df_new$age_group),
+                       bmi_group = as.factor(df_new$bmi_group),
+                       smoker = as.factor(df_new$smoker),
+                       location = as.factor(df_new$location),
+                       yearly_physical = as.factor(df_new$yearly_physical),
+                       exercise = as.factor(df_new$exercise))
+      return(df)
+    }
+    
+    
+    #load a model, do prediction and compute the confusion matrix
+    use_model_to_predict <- function(df, df_solution){
+      #load the pre-built model, we named it ‘our_model.rda’
+      load(file="our_model.rda")
+      #use the model with new data
+      data=process_df(df)
+      pred <- predict(our_model, newdata=data)
+      #show how the model performed
+      df_solution <-df_solution %>% mutate(expensive = case_when(
+      df_solution$expensive == FALSE ~ "no",
+      TRUE ~ "yes"))
+      confusionMatrix(pred, as.factor(df_solution$expensive))
+    }
+    
+    #get confusion matrix
+    getMatrixTable <- function(df, df_solution) {
+      #load the pre-built model, we named it ‘our_model.rda’
+      load(file="our_model.rda")
+      #use the model with new data
+      data=process_df(df)
+      pred <- predict(our_model, newdata=data)
+      #show how the model performed
+      df_solution <-df_solution %>% mutate(expensive = case_when(
+        df_solution$expensive == FALSE ~ "no",
+        TRUE ~ "yes"))}
+    
+  
+```
+```{r}
+shinyApp(ui = ui, server = server)
+runGitHub( "nancyshih/shinyapp", "nancyshih")
