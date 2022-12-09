@@ -1,3 +1,4 @@
+```{r}
 library(shiny)
 library(rsconnect)
 
@@ -252,3 +253,4 @@ server <- function(input, output, session) {
 ```{r}
 shinyApp(ui = ui, server = server)
 runGitHub( "nancyshih/shinyapp", "nancyshih")
+```
